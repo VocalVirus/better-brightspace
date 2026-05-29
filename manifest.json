@@ -7,7 +7,7 @@
     "default_popup": "index.html",
     "default_title": "Better Brightspace"
   },
-  "permissions": ["storage"],
+  "permissions": ["storage", "cookies"],
   "host_permissions": ["https://brightspace.vanderbilt.edu/*"],
   "content_scripts": [
     {
