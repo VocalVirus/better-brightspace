@@ -1,0 +1,1 @@
+console.log('[Better Brightspace] content script loaded');

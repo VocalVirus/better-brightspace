@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Better Brightspace",
+  "version": "0.0.1",
+  "description": "An improved interface for Vanderbilt Brightspace.",
+  "action": {
+    "default_popup": "index.html",
+    "default_title": "Better Brightspace"
+  },
+  "permissions": ["storage"],
+  "host_permissions": ["https://brightspace.vanderbilt.edu/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://brightspace.vanderbilt.edu/*"],
+      "js": ["src/content/contentScript.ts"]
+    }
+  ]
+}
