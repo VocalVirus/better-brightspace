@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getEnrollments, type Enrollment } from './lib/api';
+import { getCurrentCourses, type Enrollment } from './lib/api';
 import './App.css';
 
 function App() {
@@ -8,7 +8,7 @@ function App() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    getEnrollments()
+    getCurrentCourses()
       .then((items) => {
         setEnrollments(items);
         setLoading(false);
@@ -24,16 +24,17 @@ function App() {
       <h2 style={{ marginTop: 0 }}>Better Brightspace</h2>
       {loading && <p>Loading your courses...</p>}
       {error && <p style={{ color: 'red' }}>Error: {error}</p>}
+      {!loading && !error && enrollments.length === 0 && (
+        <p>No current courses found.</p>
+      )}
       {!loading && !error && (
         <ul style={{ listStyle: 'none', padding: 0 }}>
           {enrollments.map((e) => (
             <li
               key={e.OrgUnit.Id}
-              style={{ padding: '4px 0', borderBottom: '1px solid #eee' }}
+              style={{ padding: '8px 0', borderBottom: '1px solid #eee' }}
             >
-              <strong>{e.OrgUnit.Code}</strong>
-              <br />
-              <span style={{ fontSize: '12px', color: '#666' }}>{e.OrgUnit.Name}</span>
+              <strong>{e.OrgUnit.Name}</strong>
             </li>
           ))}
         </ul>
