@@ -1,6 +1,16 @@
 import { useEffect, useState } from 'react';
 import { getCurrentCourses, getAllAssignments, type Enrollment, type Assignment } from './lib/api';
+import GpaCalculator from './GpaCalculator';
 import './App.css';
+
+const CACHE_KEY = 'bbAssignmentsCache';
+const CACHE_TTL = 5 * 60 * 1000;
+
+type AssignmentsCache = {
+  enrollments: Enrollment[];
+  assignments: Assignment[];
+  cachedAt: number;
+};
 
 const PRESETS = [
   { label: 'Default',    value: '',                                                   preview: '#e8e8e8' },
@@ -10,7 +20,7 @@ const PRESETS = [
   { label: 'Forest',     value: 'linear-gradient(135deg, #134e5e, #71b280)',          preview: 'linear-gradient(135deg, #134e5e, #71b280)' },
 ];
 
-type Tab = 'courses' | 'assignments';
+type Tab = 'assignments' | 'gpa';
 
 function formatDue(dueDateStr: string | null): { text: string; color: string } {
   if (!dueDateStr) return { text: 'No due date', color: '#666' };
@@ -28,32 +38,56 @@ function formatDue(dueDateStr: string | null): { text: string; color: string } {
 }
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>('courses');
+  const [tab, setTab] = useState<Tab>('assignments');
   const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
   const [coursesLoading, setCoursesLoading] = useState(true);
-  const [coursesError, setCoursesError] = useState<string | null>(null);
   const [background, setBackground] = useState('');
   const [assignments, setAssignments] = useState<Assignment[] | null>(null);
   const [assignmentsLoading, setAssignmentsLoading] = useState(false);
   const [assignmentsError, setAssignmentsError] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   useEffect(() => {
-    getCurrentCourses()
-      .then((items) => { setEnrollments(items); setCoursesLoading(false); })
-      .catch((err)  => { setCoursesError(err.message); setCoursesLoading(false); });
+    chrome.storage.local.get(CACHE_KEY, (stored) => {
+      const cached = stored[CACHE_KEY] as AssignmentsCache | undefined;
+
+      if (cached) {
+        setEnrollments(cached.enrollments);
+        setAssignments(cached.assignments);
+        setCoursesLoading(false);
+      }
+
+      const needsRefresh = !cached || Date.now() - cached.cachedAt > CACHE_TTL;
+      if (!needsRefresh) return;
+
+      if (cached) setIsRefreshing(true);
+      else { setCoursesLoading(true); setAssignmentsLoading(true); }
+
+      getCurrentCourses()
+        .then(async (courses) => {
+          setEnrollments(courses);
+          setCoursesLoading(false);
+          const fresh = await getAllAssignments(courses);
+          setAssignments(fresh);
+          setAssignmentsLoading(false);
+          setIsRefreshing(false);
+          chrome.storage.local.set({
+            [CACHE_KEY]: { enrollments: courses, assignments: fresh, cachedAt: Date.now() } satisfies AssignmentsCache,
+          });
+        })
+        .catch((err) => {
+          const msg = (err as Error).message;
+          setAssignmentsError(msg);
+          setCoursesLoading(false);
+          setAssignmentsLoading(false);
+          setIsRefreshing(false);
+        });
+    });
 
     chrome.storage.sync.get('background', (result) => {
       if (result.background) setBackground(result.background as string);
     });
   }, []);
-
-  useEffect(() => {
-    if (tab !== 'assignments' || assignments !== null || assignmentsLoading || enrollments.length === 0) return;
-    setAssignmentsLoading(true);
-    getAllAssignments(enrollments)
-      .then((items) => { setAssignments(items); setAssignmentsLoading(false); })
-      .catch((err)  => { setAssignmentsError(err.message); setAssignmentsLoading(false); });
-  }, [tab, enrollments, assignments, assignmentsLoading]);
 
   function chooseBackground(value: string) {
     setBackground(value);
@@ -108,7 +142,7 @@ export default function App() {
 
       {/* Tabs */}
       <div style={{ display: 'flex', borderBottom: '1px solid #2a2a2a', marginBottom: '10px' }}>
-        {(['courses', 'assignments'] as Tab[]).map((t) => (
+        {(['assignments', 'gpa'] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -122,7 +156,7 @@ export default function App() {
               background: 'none',
               color: tab === t ? '#b3a369' : '#666',
               fontWeight: tab === t ? 700 : 400,
-              textTransform: 'capitalize',
+              textTransform: t === 'gpa' ? 'uppercase' : 'capitalize',
               outline: 'none',
             }}
           >
@@ -131,28 +165,11 @@ export default function App() {
         ))}
       </div>
 
-      {/* Courses tab */}
-      {tab === 'courses' && (
-        <div>
-          {coursesLoading && <p style={msgStyle}>Loading courses…</p>}
-          {coursesError  && <p style={{ ...msgStyle, color: '#ff5555' }}>Error: {coursesError}</p>}
-          {!coursesLoading && !coursesError && enrollments.length === 0 && (
-            <p style={msgStyle}>No current courses found.</p>
-          )}
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-            {enrollments.map((e) => (
-              <li key={e.OrgUnit.Id} style={courseRowStyle}>
-                {e.OrgUnit.Name}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
       {/* Assignments tab */}
       {tab === 'assignments' && (
         <div>
           {(coursesLoading || assignmentsLoading) && <p style={msgStyle}>Loading assignments…</p>}
+          {isRefreshing && <p style={{ ...msgStyle, color: '#555', fontSize: '11px' }}>↻ Refreshing…</p>}
           {assignmentsError && <p style={{ ...msgStyle, color: '#ff5555' }}>Error: {assignmentsError}</p>}
           {!assignmentsLoading && assignments && assignments.length === 0 && (
             <p style={msgStyle}>No assignments found.</p>
@@ -173,9 +190,10 @@ export default function App() {
           )}
         </div>
       )}
+      {/* GPA tab */}
+      {tab === 'gpa' && <GpaCalculator enrollments={enrollments} />}
     </div>
   );
 }
 
 const msgStyle: React.CSSProperties = { fontSize: '13px', color: '#666', margin: '6px 0' };
-const courseRowStyle: React.CSSProperties = { padding: '8px 0', borderBottom: '1px solid #222', fontSize: '13px', color: '#ccc' };

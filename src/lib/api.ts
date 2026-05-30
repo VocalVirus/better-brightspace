@@ -16,6 +16,17 @@ export type Assignment = {
   orgUnitId: number;
 };
 
+let _userId: string | null = null;
+
+async function getUserId(): Promise<string> {
+  if (_userId) return _userId;
+  const res = await fetch(`${BASE}/lp/1.60/users/whoami`, { credentials: 'include' });
+  if (!res.ok) throw new Error(`whoami failed: ${res.status}`);
+  const data = await res.json();
+  _userId = String(data.Identifier);
+  return _userId;
+}
+
 function getCurrentTermCode(): string {
   const now = new Date();
   const year = now.getFullYear();
@@ -57,6 +68,61 @@ async function getDropboxFolders(orgUnitId: number): Promise<{ Id: number; Name:
   });
   if (!res.ok) return [];
   return res.json();
+}
+
+export type BrightspaceGradeItem = {
+  id: string;
+  name: string;
+  pointsEarned: number;
+  pointsPossible: number;
+  pct: number;
+};
+
+export async function getCourseGradeItems(orgUnitId: number): Promise<BrightspaceGradeItem[]> {
+  const userId = await getUserId();
+  const res = await fetch(`${BASE}/le/1.71/${orgUnitId}/grades/values/${userId}/`, {
+    credentials: 'include',
+  });
+  if (!res.ok) return [];
+  const data = await res.json();
+  const raw: any[] = Array.isArray(data) ? data : (data.Objects ?? []);
+  return raw
+    .filter((item) => item.GradeObjectType === 1 && item.PointsNumerator != null && item.PointsDenominator > 0)
+    .map((item) => ({
+      id: String(item.GradeObjectIdentifier),
+      name: item.GradeObjectName as string,
+      pointsEarned: item.PointsNumerator as number,
+      pointsPossible: item.PointsDenominator as number,
+      pct: (item.PointsNumerator / item.PointsDenominator) * 100,
+    }));
+}
+
+type FinalGradeValue = {
+  PointsNumerator: number | null;
+  PointsDenominator: number | null;
+  WeightedNumerator: number | null;
+  WeightedDenominator: number | null;
+  DisplayedGrade: string | null;
+};
+
+export async function getCourseGrade(orgUnitId: number): Promise<number | null> {
+  const userId = await getUserId();
+  const res = await fetch(`${BASE}/le/1.71/${orgUnitId}/grades/final/values/${userId}/`, {
+    credentials: 'include',
+  });
+  if (!res.ok) return null;
+  const data: FinalGradeValue = await res.json();
+  if (data.PointsNumerator != null && data.PointsDenominator != null && data.PointsDenominator > 0) {
+    return (data.PointsNumerator / data.PointsDenominator) * 100;
+  }
+  if (data.WeightedNumerator != null && data.WeightedDenominator != null && data.WeightedDenominator > 0) {
+    return (data.WeightedNumerator / data.WeightedDenominator) * 100;
+  }
+  if (data.DisplayedGrade) {
+    const match = data.DisplayedGrade.match(/(\d+\.?\d*)/);
+    if (match) return parseFloat(match[1]);
+  }
+  return null;
 }
 
 export async function getAllAssignments(enrollments: Enrollment[]): Promise<Assignment[]> {
